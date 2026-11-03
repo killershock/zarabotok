@@ -637,6 +637,24 @@ main {
 .line .dsc { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
 .line .val { font-weight: 750; font-size: 14px; white-space: nowrap; }
 .line .chev { color: var(--muted); width: 18px; height: 18px; flex: 0 0 auto; }
+
+/* ---------- каталог услуг: повышение одной услуги ---------- */
+.service-row { display: flex; align-items: center; gap: 8px; }
+.service-row + .service-row { border-top: 1px solid var(--line); }
+.service-row > .line { flex: 1; min-width: 0; border-top: 0; }
+.raise-one {
+  flex: 0 0 auto;
+  border: 0;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  height: 32px;
+  padding: 0 9px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: -.2px;
+}
+@media (prefers-color-scheme: dark) { .raise-one { color: var(--accent); } }
 .line.danger .ttl { color: var(--danger); }
 
 .section-title {
