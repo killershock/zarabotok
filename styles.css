@@ -423,6 +423,13 @@ main {
 .chip.active { background: var(--text); color: var(--bg); }
 .chip .dot { width: 8px; height: 8px; border-radius: 50%; }
 
+/* ---------- изменение цен ---------- */
+.price-old { color: var(--muted); text-decoration: line-through; font-weight: 500; }
+.price-new { color: var(--accent); }
+.price-arrow { color: var(--muted); margin: 0 5px; }
+#price-preview .line { padding: 9px 0; }
+#price-preview .line:first-child { border-top: 0; }
+
 /* ---------- резервные копии ---------- */
 .notice {
   position: relative;
@@ -704,6 +711,76 @@ main {
 .total-line b { font-size: 20px; letter-spacing: -.4px; }
 
 .sheet-actions { display: flex; gap: 10px; margin-top: 4px; }
+
+/* ---------- несколько услуг в записи ---------- */
+.item-row {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 8px 12px 12px;
+  margin-bottom: 10px;
+  background: var(--card);
+}
+.item-head { display: flex; align-items: center; gap: 6px; }
+.item-head input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font-size: 16px;
+  font-weight: 650;
+  padding: 8px 0;
+  outline: none;
+}
+.item-head input::placeholder { font-weight: 500; color: var(--muted); }
+.item-del {
+  border: 0;
+  background: var(--bg);
+  color: var(--muted);
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+.item-del svg { width: 15px; height: 15px; }
+.item-grid {
+  display: grid;
+  grid-template-columns: 1fr 66px 1fr;
+  gap: 8px;
+  align-items: end;
+  margin-top: 4px;
+}
+.mini-field { display: block; min-width: 0; }
+.mini-field > span,
+.item-line > span {
+  display: block;
+  font-size: 10px;
+  font-weight: 650;
+  color: var(--muted);
+  letter-spacing: .2px;
+  text-transform: uppercase;
+  margin: 0 0 4px 2px;
+}
+.item-grid input {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  border-radius: 10px;
+  padding: 9px 10px;
+  font-size: 15px;
+  outline: none;
+}
+.item-grid input:focus { border-color: var(--accent); }
+.item-line b {
+  display: block;
+  padding: 9px 2px 9px 0;
+  text-align: right;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .sheet-actions .btn { flex: 1; }
 .sheet-actions .btn.primary { flex: 1.6; }
 
