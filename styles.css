@@ -430,6 +430,53 @@ main {
 #price-preview .line { padding: 9px 0; }
 #price-preview .line:first-child { border-top: 0; }
 
+/* ---------- импорт от сотрудников ---------- */
+.import-group {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  margin-bottom: 10px;
+  background: var(--card);
+}
+.import-group .ttl { font-weight: 750; font-size: 14.5px; }
+.import-group .dsc { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.import-group select {
+  width: 100%;
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 10px 12px;
+  background: var(--bg);
+  font-size: 15px;
+  outline: none;
+}
+.import-name {
+  width: 100%;
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 10px 12px;
+  background: var(--bg);
+  font-size: 16px;
+  outline: none;
+}
+.import-name:focus, .import-group select:focus { border-color: var(--accent); }
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  color: var(--muted);
+  margin: 4px 2px 14px;
+  line-height: 1.35;
+}
+.check-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  flex: 0 0 auto;
+}
+
 /* ---------- резервные копии ---------- */
 .notice {
   position: relative;
