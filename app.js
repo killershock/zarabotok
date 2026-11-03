@@ -7,7 +7,7 @@ const CLOUD_KEY = 'zarabotok_cloud_v1';
 const BACKUP_PROMPT_KEY = 'zarabotok_backup_prompt';
 const PRICE_UNDO_KEY = 'zarabotok_price_undo';
 const IMPORT_MAP_KEY = 'zarabotok_import_map';
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.0';
 
 const PALETTE = ['#16a34a', '#2563eb', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 const CURRENCIES = [
@@ -742,8 +742,9 @@ function renderMore() {
           </div>`).join('')
         : `<p class="tiny muted">Добавьте частые услуги с ценой — при создании записи цена подставится автоматически, и заполнять станет быстрее.</p>`}
       ${data.services.length ? `<p class="tiny muted" style="margin:4px 2px 2px">Кнопка «+%» — повысить цену только этой услуги</p>` : ''}
-      ${data.services.length ? `<div class="row-actions mt12">
-        <button class="btn" type="button" data-action="raise-prices">Повысить цены</button>
+      ${data.services.length ? `<div class="mt12">
+        <button class="btn primary block" type="button" data-action="raise-prices">Повысить выбранные услуги</button>
+        <button class="btn block" type="button" data-action="raise-all-prices" style="margin-top:8px">Повысить все цены</button>
       </div>
       ${priceUndoAvailable() ? '<button class="txt-btn" type="button" data-action="undo-prices">Отменить последнее изменение цен</button>' : ''}` : ''}
     </div>
@@ -1262,11 +1263,19 @@ function pricePresetsHtml() {
   return list.map((v) => `<button class="chip" type="button" data-price-preset="${v}">${priceRaise.mode === 'percent' ? `+${v}%` : `+${nfInt.format(v)} ${currency()}`}</button>`).join('');
 }
 
+function priceIntroText() {
+  const count = priceRaise.selected.size;
+  if (!count) return 'Отметьте услуги, на которые нужно повысить цену. Записи и суммы за прошлые дни не изменятся.';
+  if (count === data.services.length) return 'Отмечены все услуги. Записи и суммы за прошлые дни не изменятся.';
+  if (count === 1) {
+    const one = data.services.find((s) => priceRaise.selected.has(s.id));
+    return `Отмечена только «${one ? one.name : 'услуга'}». Изменятся только отмеченные услуги, записи и суммы за прошлые дни не изменятся.`;
+  }
+  return `Отмечено услуг: ${count} из ${data.services.length}. Изменятся только отмеченные, записи и суммы за прошлые дни не изменятся.`;
+}
+
 function priceSheetHtml() {
   const isPercent = priceRaise.mode === 'percent';
-  const single = priceRaise.selected.size === 1
-    ? data.services.find((s) => priceRaise.selected.has(s.id))
-    : null;
   const roundOptions = [
     [0, 'Без округления'],
     [1, 'До целого'],
@@ -1278,12 +1287,10 @@ function priceSheetHtml() {
   return `
     <div class="grab"></div>
     <div class="sheet-head">
-      <h2>${single ? 'Повышение цены' : 'Повышение цен'}</h2>
+      <h2 id="price-title">${priceRaise.selected.size === 1 ? 'Повышение цены' : 'Повышение цен'}</h2>
       <button class="x" type="button" data-action="close-sheet" aria-label="Закрыть">${X_ICON}</button>
     </div>
-    <p class="tiny muted">${single
-      ? `Отмечена только «${esc(single.name)}». Изменятся только отмеченные услуги, записи и суммы за прошлые дни не изменятся.`
-      : 'Выберите услуги: можно изменить все сразу или только нужные. Записи и суммы за прошлые дни не изменятся.'}</p>
+    <p class="tiny muted" id="price-intro">${priceIntroText()}</p>
 
     <div class="segmented" style="grid-template-columns:1fr 1fr;margin:14px 0 10px">
       <button type="button" data-price-mode="percent" class="${isPercent ? 'active' : ''}">Процент</button>
@@ -1317,22 +1324,29 @@ function priceSheetHtml() {
 
       <div class="sheet-actions">
         <button class="btn" type="button" data-action="close-sheet">Отмена</button>
-        <button class="btn primary" type="submit">Применить</button>
+        <button class="btn primary" type="submit" id="price-apply" ${priceRaise.selected.size ? '' : 'disabled'}>Применить</button>
       </div>
       <div class="sheet-note">Изменение можно отменить в каталоге услуг</div>
     </form>
   `;
 }
 
-function openPriceSheet(preselectId) {
+function openPriceSheet(preselect) {
   if (!data.services.length) return toast('Сначала добавьте услуги в каталог');
   sheetState.type = 'price';
   sheetState.id = null;
   priceRaise.mode = 'percent';
   priceRaise.value = 10;
   priceRaise.round = 0;
-  const one = preselectId ? data.services.find((s) => s.id === preselectId) : null;
-  priceRaise.selected = new Set(one ? [one.id] : data.services.map((s) => s.id));
+
+  if (preselect === 'all') {
+    priceRaise.selected = new Set(data.services.map((s) => s.id));
+  } else if (preselect && data.services.some((s) => s.id === preselect)) {
+    priceRaise.selected = new Set([preselect]);
+  } else {
+    priceRaise.selected = new Set();
+  }
+
   openSheet(priceSheetHtml());
 }
 
@@ -1343,6 +1357,12 @@ function renderPricePreview() {
   if (count) count.textContent = `${priceChangedCount()} из ${data.services.length}`;
   const selected = $('#price-selected-count');
   if (selected) selected.textContent = `Выбрано: ${priceRaise.selected.size} из ${data.services.length}`;
+  const apply = $('#price-apply');
+  if (apply) apply.disabled = priceRaise.selected.size === 0;
+  const title = $('#price-title');
+  if (title) title.textContent = priceRaise.selected.size === 1 ? 'Повышение цены' : 'Повышение цен';
+  const intro = $('#price-intro');
+  if (intro) intro.textContent = priceIntroText();
 }
 
 function syncPriceForm() {
@@ -2448,6 +2468,9 @@ document.addEventListener('click', (e) => {
       break;
     case 'raise-prices':
       openPriceSheet();
+      break;
+    case 'raise-all-prices':
+      openPriceSheet('all');
       break;
     case 'raise-one-price':
       openPriceSheet(id);
