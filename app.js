@@ -7,7 +7,7 @@ const CLOUD_KEY = 'zarabotok_cloud_v1';
 const BACKUP_PROMPT_KEY = 'zarabotok_backup_prompt';
 const PRICE_UNDO_KEY = 'zarabotok_price_undo';
 const IMPORT_MAP_KEY = 'zarabotok_import_map';
-const APP_VERSION = '1.7.1';
+const APP_VERSION = '1.7.2';
 
 const PALETTE = ['#16a34a', '#2563eb', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 const CURRENCIES = [
@@ -809,6 +809,7 @@ function renderMore() {
         «Ещё → Резервные копии».
       </p>
       <p class="tiny muted mt8">Версия ${APP_VERSION}</p>
+      <button class="txt-btn" type="button" data-action="check-updates" style="padding-left:0">Проверить обновление</button>
     </div>
   `;
 }
@@ -2505,6 +2506,9 @@ document.addEventListener('click', (e) => {
     case 'import-employees':
       importFromEmployees();
       break;
+    case 'check-updates':
+      checkForUpdates();
+      break;
     case 'export-csv':
       exportCsv();
       break;
@@ -2669,6 +2673,21 @@ async function installApp() {
   } catch (err) { /* ignore */ }
   deferredPrompt = null;
   renderMore();
+}
+
+async function checkForUpdates() {
+  toast('Проверяю обновление...');
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((reg) => reg.update().catch(() => {})));
+    }
+    const keys = await caches.keys();
+    await Promise.all(keys.filter((key) => key.startsWith('zarabotok')).map((key) => caches.delete(key)));
+  } catch (err) {
+    /* ignore */
+  }
+  setTimeout(() => location.reload(), 800);
 }
 
 /* ---------------- запуск ---------------- */
