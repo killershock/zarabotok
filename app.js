@@ -5,7 +5,8 @@
 const LS_KEY = 'zarabotok_v1';
 const CLOUD_KEY = 'zarabotok_cloud_v1';
 const BACKUP_PROMPT_KEY = 'zarabotok_backup_prompt';
-const APP_VERSION = '1.1.1';
+const PRICE_UNDO_KEY = 'zarabotok_price_undo';
+const APP_VERSION = '1.3.0';
 
 const PALETTE = ['#16a34a', '#2563eb', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 const CURRENCIES = [
@@ -99,17 +100,28 @@ function normalize(d) {
     .map((s) => ({ id: s.id, name: String(s.name), price: round2(s.price) }));
   out.entries = out.entries
     .filter((e) => e && e.id && /^\d{4}-\d{2}-\d{2}$/.test(e.date))
-    .map((e) => ({
-      id: e.id,
-      date: e.date,
-      employeeId: e.employeeId || null,
-      service: String(e.service || 'Услуга'),
-      qty: Number(e.qty) > 0 ? Number(e.qty) : 1,
-      price: round2(e.price != null ? e.price : e.amount),
-      amount: round2(e.amount != null ? e.amount : e.price),
-      note: String(e.note || ''),
-      createdAt: e.createdAt || Date.now(),
-    }));
+    .map((e) => {
+      const rawItems = Array.isArray(e.items) && e.items.length
+        ? e.items
+        : [{ service: e.service, qty: e.qty, price: e.price, amount: e.amount }];
+      const items = rawItems.map((it) => {
+        const qty = Number(it.qty) > 0 ? Number(it.qty) : 1;
+        const price = round2(it.price != null ? it.price : (Number(it.amount) || 0) / qty);
+        const amount = round2(it.amount != null ? it.amount : price * qty);
+        return { service: String(it.service || 'Услуга'), qty, price, amount };
+      });
+      const amount = round2(items.reduce((sum, it) => sum + it.amount, 0));
+      return {
+        id: e.id,
+        date: e.date,
+        employeeId: e.employeeId || null,
+        items,
+        amount,
+        note: String(e.note || ''),
+        createdAt: e.createdAt || Date.now(),
+        ...(e.updatedAt ? { updatedAt: e.updatedAt } : {}),
+      };
+    });
   return out;
 }
 
@@ -263,13 +275,17 @@ function breakdown(list) {
 function entryRowHtml(e) {
   const name = employeeName(e.employeeId);
   const color = employeeColor(e.employeeId);
+  const items = e.items || [];
+  const title = items.map((it) => it.service).join(' + ') || 'Услуга';
   const parts = [name];
-  if (Number(e.qty) > 1) parts.push(`${nfInt.format(e.qty)} × ${money(e.price)}`);
+  if (items.length > 1) parts.push(`${items.length} ${plural(items.length, 'услуга', 'услуги', 'услуг')}`);
+  const multiQty = items.filter((it) => Number(it.qty) > 1);
+  if (multiQty.length === 1) parts.push(`${nfInt.format(multiQty[0].qty)} × ${money(multiQty[0].price)}`);
   if (e.note) parts.push(e.note);
   return `<button class="entry" type="button" data-action="edit-entry" data-id="${esc(e.id)}">
     ${avatarHtml(name, color)}
     <div>
-      <div class="entry-title">${esc(e.service)}</div>
+      <div class="entry-title">${esc(title)}</div>
       <div class="entry-sub">${esc(parts.join(' · '))}</div>
     </div>
     <div class="entry-amount">${money(e.amount)}</div>
@@ -452,7 +468,13 @@ function filteredEntries() {
     })
     .filter((e) => {
       if (!q) return true;
-      const hay = [e.service, e.note, employeeName(e.employeeId), String(e.amount), e.date].join(' ').toLowerCase();
+      const hay = [
+        (e.items || []).map((it) => it.service).join(' '),
+        e.note,
+        employeeName(e.employeeId),
+        String(e.amount),
+        e.date,
+      ].join(' ').toLowerCase();
       return hay.includes(q);
     })
     .sort(byDateDesc);
@@ -676,10 +698,11 @@ function renderMore() {
        <button class="txt-btn mt8" type="button" data-action="cloud-off" style="color:var(--danger)">Отключить облачную копию</button>`
     : `<div class="divider"></div>
        <div class="card-head" style="margin-bottom:6px"><h2>Облачная копия GitHub</h2><span class="badge">не подключена</span></div>
-       <p class="tiny muted">Копия будет сама уходить в приватный GitHub Gist раз в месяц — данные переживут потерю или поломку телефона.</p>
+       <p class="tiny muted">Копия будет сама уходить в секретный GitHub Gist раз в месяц — данные переживут потерю или поломку телефона.</p>
        <label class="field mt12"><span>Токен GitHub (право «gist»)</span><input id="cloud-token" type="password" placeholder="ghp_..." autocomplete="off" autocapitalize="off" spellcheck="false"></label>
        <button class="btn primary block" type="button" data-action="cloud-connect">Подключить</button>
-       <p class="tiny muted mt8">Создайте <a href="https://github.com/settings/tokens/new?scopes=gist&description=Zarabotok" target="_blank" rel="noopener" style="color:var(--accent)">классический токен</a> и отметьте только галочку «gist». Токен хранится только на этом телефоне.</p>`;
+       <p class="tiny muted mt8">Создайте <a href="https://github.com/settings/tokens/new?scopes=gist&description=Zarabotok" target="_blank" rel="noopener" style="color:var(--accent)">классический токен</a> и отметьте только галочку «gist». Токен хранится только на этом телефоне.</p>
+       <p class="tiny muted mt8"><b>Важно:</b> Gist не зашифрован. Он не попадает в поиск, но открывается по прямой ссылке — не публикуйте её и не передавайте токен.</p>`;
 
   const backupCardHtml = `<div class="section-title">Резервные копии</div>
     <div class="card" id="backup-card">
@@ -715,6 +738,10 @@ function renderMore() {
             ${CHEV}
           </button>`).join('')
         : `<p class="tiny muted">Добавьте частые услуги с ценой — при создании записи цена подставится автоматически, и заполнять станет быстрее.</p>`}
+      ${data.services.length ? `<div class="row-actions mt12">
+        <button class="btn" type="button" data-action="raise-prices">Повысить цены</button>
+      </div>
+      ${priceUndoAvailable() ? '<button class="txt-btn" type="button" data-action="undo-prices">Отменить последнее изменение цен</button>' : ''}` : ''}
     </div>
 
     ${installBlock}
@@ -759,12 +786,12 @@ function renderMore() {
     <div class="card">
       <div class="card-head"><h2>О приложении</h2></div>
       <p class="tiny muted">
-        «Заработок» — простой учёт оказанных услуг. Записывайте стоимость каждой услуги, а приложение посчитает
-        суммы за день, неделю, месяц и год, в том числе по каждому сотруднику.
+        «Заработок» — простой учёт оказанных услуг. В одну запись можно добавить несколько услуг, а приложение
+        посчитает суммы за день, неделю, месяц и год, в том числе по каждому сотруднику.
       </p>
       <p class="tiny muted mt8">
         Все данные хранятся на этом устройстве. Раз в месяц приложение автоматически делает копию на телефоне,
-        а при подключении GitHub — ещё и в приватный Gist. Копии можно скачать или восстановить в разделе
+        а при подключении GitHub — ещё и в секретный Gist. Копии можно скачать или восстановить в разделе
         «Ещё → Резервные копии».
       </p>
       <p class="tiny muted mt8">Версия ${APP_VERSION}</p>
@@ -839,11 +866,31 @@ function askConfirm({ title, text, okText = 'Удалить', danger = true }) {
 
 /* ---------------- запись ---------------- */
 
+function itemRowHtml(item) {
+  const it = item || { service: '', qty: 1, price: 0, amount: 0 };
+  const priceValue = Number(it.price) > 0 ? it.price : '';
+  const amount = round2((Number(it.price) || 0) * (Number(it.qty) || 1));
+  return `<div class="item-row">
+    <div class="item-head">
+      <input name="item-service" list="service-options" placeholder="Название услуги" value="${esc(it.service || '')}" autocomplete="off">
+      <button class="item-del" type="button" data-action="remove-item" aria-label="Убрать услугу">${X_ICON}</button>
+    </div>
+    <div class="item-grid">
+      <label class="mini-field"><span>Цена, ${esc(currency())}</span><input name="item-price" inputmode="decimal" placeholder="0" value="${esc(priceValue)}"></label>
+      <label class="mini-field"><span>Кол-во</span><input name="item-qty" inputmode="numeric" placeholder="1" value="${esc(it.qty || 1)}"></label>
+      <div class="item-line"><span>Сумма</span><b class="item-sum">${money(amount)}</b></div>
+    </div>
+  </div>`;
+}
+
 function entrySheetHtml(entry) {
   const isEdit = !!entry;
   const date = entry ? entry.date : toKey(new Date());
   const employees = data.employees;
   const selected = sheetState.employeeId;
+  const initialItems = entry && entry.items && entry.items.length
+    ? entry.items
+    : [{ service: '', qty: 1, price: 0, amount: 0 }];
 
   const empChips = employees.map((emp) => `
     <button class="chip ${selected === emp.id ? 'active' : ''}" type="button" data-pick-emp="${esc(emp.id)}">
@@ -858,30 +905,23 @@ function entrySheetHtml(entry) {
       <button class="x" type="button" data-action="close-sheet" aria-label="Закрыть">${X_ICON}</button>
     </div>
     <form id="entry-form" novalidate>
-      <div class="row2">
-        <label class="field"><span>Дата</span><input type="date" name="date" value="${esc(date)}" required></label>
-        <label class="field"><span>Кол-во</span><input type="number" name="qty" inputmode="numeric" min="0.1" step="any" value="${esc(entry ? entry.qty : 1)}"></label>
-      </div>
+      <label class="field"><span>Дата</span><input type="date" name="date" value="${esc(date)}" required></label>
 
       <div class="field">
         <span>Сотрудник</span>
         <div class="chips wrap" style="padding-bottom:0">${empChips}</div>
       </div>
 
-      <label class="field">
-        <span>Услуга</span>
-        <input name="service" list="service-options" placeholder="Например, маникюр" value="${esc(entry ? entry.service : '')}" autocomplete="off">
+      <div class="field">
+        <span>Услуги в записи</span>
+        <div id="entry-items">${initialItems.map(itemRowHtml).join('')}</div>
+        <button class="btn block" type="button" data-action="add-item">${PLUS_ICON} Добавить услугу</button>
         <datalist id="service-options">
           ${data.services.map((s) => `<option value="${esc(s.name)}"></option>`).join('')}
         </datalist>
-      </label>
+      </div>
 
-      <label class="field">
-        <span>Цена, ${esc(currency())}</span>
-        <input type="text" name="price" inputmode="decimal" placeholder="0" value="${esc(entry ? entry.price : '')}">
-      </label>
-
-      <div class="total-line"><span>Итого</span><b id="entry-total">${money(entry ? entry.amount : 0)}</b></div>
+      <div class="total-line"><span>Итого <span id="entry-items-count" style="font-weight:600;opacity:.75"></span></span><b id="entry-total">${money(entry ? entry.amount : 0)}</b></div>
 
       <label class="field"><span>Заметка</span><input name="note" placeholder="Необязательно" value="${esc(entry ? entry.note : '')}" autocomplete="off"></label>
 
@@ -889,7 +929,7 @@ function entrySheetHtml(entry) {
         ${isEdit ? '<button class="btn danger" type="button" data-action="delete-entry">Удалить</button>' : ''}
         <button class="btn primary" type="submit">${isEdit ? 'Сохранить' : 'Добавить'}</button>
       </div>
-      <div class="sheet-note">${isEdit ? 'Изменения сохранятся на этом устройстве' : 'Запись добавится в выбранную дату'}</div>
+      <div class="sheet-note">${isEdit ? 'Изменения сохранятся на этом устройстве' : 'Можно добавить несколько услуг в одну запись'}</div>
     </form>
   `;
 }
@@ -905,55 +945,96 @@ function openEntrySheet(id, presetEmployeeId) {
 
 function updateEntryTotal() {
   const form = $('#entry-form');
-  if (!form) return;
-  const price = parseAmount(form.querySelector('[name="price"]').value);
-  const qty = parseAmount(form.querySelector('[name="qty"]').value) || 1;
-  const total = round2(price * qty);
+  if (!form) return { total: 0, count: 0 };
+  let total = 0;
+  let count = 0;
+
+  $$('.item-row', form).forEach((row) => {
+    const price = parseAmount(row.querySelector('[name="item-price"]').value);
+    const qty = parseAmount(row.querySelector('[name="item-qty"]').value) || 1;
+    const amount = round2(price * qty);
+    const sum = row.querySelector('.item-sum');
+    if (sum) sum.textContent = money(amount);
+    total = round2(total + amount);
+    const name = row.querySelector('[name="item-service"]').value.trim();
+    if (price > 0 || name) count += 1;
+  });
+
   const out = $('#entry-total');
   if (out) out.textContent = money(total);
-  const totalInput = form.querySelector('[name="total"]');
-  if (totalInput) totalInput.value = total ? nfMoney.format(total) : '';
+  const cnt = $('#entry-items-count');
+  if (cnt) cnt.textContent = count ? `· ${count} ${plural(count, 'услуга', 'услуги', 'услуг')}` : '';
+  return { total, count };
+}
+
+function addItemRow() {
+  const wrap = $('#entry-items');
+  if (!wrap) return;
+  wrap.insertAdjacentHTML('beforeend', itemRowHtml(null));
+  const rows = $$('.item-row', wrap);
+  const last = rows[rows.length - 1];
+  const input = last ? last.querySelector('[name="item-service"]') : null;
+  if (input) input.focus();
+  updateEntryTotal();
+}
+
+function removeItemRow(btn) {
+  const row = btn.closest('.item-row');
+  if (!row) return;
+  const wrap = row.parentElement;
+  if ($$('.item-row', wrap).length <= 1) {
+    const service = row.querySelector('[name="item-service"]');
+    const price = row.querySelector('[name="item-price"]');
+    const qty = row.querySelector('[name="item-qty"]');
+    if (service) service.value = '';
+    if (price) price.value = '';
+    if (qty) qty.value = '1';
+  } else {
+    row.remove();
+  }
+  updateEntryTotal();
 }
 
 function saveEntry(form) {
   const fd = new FormData(form);
   const date = String(fd.get('date') || '');
-  const service = String(fd.get('service') || '').trim();
-  const price = round2(parseAmount(fd.get('price')));
-  const qty = parseAmount(fd.get('qty')) || 1;
   const note = String(fd.get('note') || '').trim();
-  const amount = round2(price * qty);
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return toast('Укажите дату');
-  if (!(amount > 0)) return toast('Укажите цену больше нуля');
+
+  const rows = $$('.item-row', form)
+    .map((row) => ({
+      service: row.querySelector('[name="item-service"]').value.trim(),
+      price: round2(parseAmount(row.querySelector('[name="item-price"]').value)),
+      qty: parseAmount(row.querySelector('[name="item-qty"]').value) || 1,
+    }))
+    .filter((it) => it.service || it.price > 0);
+
+  if (!rows.length) return toast('Добавьте хотя бы одну услугу');
+  const noPrice = rows.find((it) => !(it.price > 0));
+  if (noPrice) return toast(`Укажите цену: ${noPrice.service || 'услуга'}`);
+
+  const items = rows.map((it) => ({
+    service: it.service || 'Услуга',
+    qty: it.qty,
+    price: it.price,
+    amount: round2(it.price * it.qty),
+  }));
+  const amount = round2(items.reduce((sum, it) => sum + it.amount, 0));
+  const payload = {
+    date,
+    employeeId: sheetState.employeeId || null,
+    items,
+    amount,
+    note,
+  };
 
   if (sheetState.id) {
     const entry = data.entries.find((e) => e.id === sheetState.id);
-    if (entry) {
-      Object.assign(entry, {
-        date,
-        employeeId: sheetState.employeeId || null,
-        service: service || 'Услуга',
-        qty,
-        price,
-        amount,
-        note,
-        updatedAt: Date.now(),
-      });
-    }
+    if (entry) Object.assign(entry, payload, { updatedAt: Date.now() });
     toast('Запись сохранена');
   } else {
-    data.entries.push({
-      id: uid(),
-      date,
-      employeeId: sheetState.employeeId || null,
-      service: service || 'Услуга',
-      qty,
-      price,
-      amount,
-      note,
-      createdAt: Date.now(),
-    });
+    data.entries.push(Object.assign({ id: uid(), createdAt: Date.now() }, payload));
     toast('Запись добавлена');
   }
 
@@ -1073,7 +1154,11 @@ function saveService(form) {
   if (!name) return toast('Введите название услуги');
   if (sheetState.id) {
     const svc = data.services.find((s) => s.id === sheetState.id);
-    if (svc) { svc.name = name; svc.price = price; }
+    if (svc) {
+      if (svc.price !== price) clearPriceUndo();
+      svc.name = name;
+      svc.price = price;
+    }
     toast('Услуга сохранена');
   } else {
     data.services.push({ id: uid(), name, price });
@@ -1098,6 +1183,189 @@ async function deleteService() {
   closeSheet();
   renderMore();
   toast('Услуга удалена');
+}
+
+/* ---------------- массовое изменение цен ---------------- */
+
+let priceUndo = loadPriceUndo();
+const priceRaise = { mode: 'percent', value: 10, round: 0 };
+
+function loadPriceUndo() {
+  try { return JSON.parse(localStorage.getItem(PRICE_UNDO_KEY) || 'null'); } catch (err) { return null; }
+}
+
+function clearPriceUndo() {
+  try { localStorage.removeItem(PRICE_UNDO_KEY); } catch (err) { /* ignore */ }
+  priceUndo = null;
+}
+
+function priceUndoAvailable() {
+  if (!priceUndo || !Array.isArray(priceUndo.prices)) return false;
+  return data.services.some((s) => {
+    const old = priceUndo.prices.find((p) => p.id === s.id);
+    return old && old.price !== s.price;
+  });
+}
+
+function calcNewPrice(price) {
+  const value = Number(priceRaise.value) || 0;
+  let next = priceRaise.mode === 'percent' ? price * (1 + value / 100) : price + value;
+  const step = Number(priceRaise.round) || 0;
+  if (step > 0) next = Math.round(next / step) * step;
+  return Math.max(0, round2(next));
+}
+
+function priceChangedCount() {
+  return data.services.filter((s) => calcNewPrice(s.price) !== s.price).length;
+}
+
+function pricePreviewHtml() {
+  if (!data.services.length) {
+    return '<div class="empty" style="padding:18px"><div class="d">В каталоге пока нет услуг</div></div>';
+  }
+  return data.services.map((s) => {
+    const next = calcNewPrice(s.price);
+    const changed = next !== s.price;
+    return `<div class="line">
+      <div class="grow"><div class="ttl">${esc(s.name)}</div></div>
+      <div class="val" style="font-size:13px">
+        ${changed ? `<span class="price-old">${money(s.price)}</span><span class="price-arrow">→</span>` : ''}
+        <span class="${changed ? 'price-new' : ''}">${money(next)}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function pricePresetsHtml() {
+  const list = priceRaise.mode === 'percent' ? [5, 10, 15, 20] : [100, 200, 500, 1000];
+  return list.map((v) => `<button class="chip" type="button" data-price-preset="${v}">${priceRaise.mode === 'percent' ? `+${v}%` : `+${nfInt.format(v)} ${currency()}`}</button>`).join('');
+}
+
+function priceSheetHtml() {
+  const isPercent = priceRaise.mode === 'percent';
+  const roundOptions = [
+    [0, 'Без округления'],
+    [1, 'До целого'],
+    [10, 'До 10'],
+    [50, 'До 50'],
+    [100, 'До 100'],
+  ].map(([v, label]) => `<option value="${v}" ${Number(priceRaise.round) === v ? 'selected' : ''}>${label}</option>`).join('');
+
+  return `
+    <div class="grab"></div>
+    <div class="sheet-head">
+      <h2>Повышение цен</h2>
+      <button class="x" type="button" data-action="close-sheet" aria-label="Закрыть">${X_ICON}</button>
+    </div>
+    <p class="tiny muted">Новые цены применятся ко всем услугам в каталоге. Уже созданные записи и суммы за прошлые дни не изменятся.</p>
+
+    <div class="segmented" style="grid-template-columns:1fr 1fr;margin:14px 0 10px">
+      <button type="button" data-price-mode="percent" class="${isPercent ? 'active' : ''}">Процент</button>
+      <button type="button" data-price-mode="amount" class="${!isPercent ? 'active' : ''}">Сумма</button>
+    </div>
+
+    <form id="price-form" novalidate>
+      <label class="field">
+        <span id="price-value-label">${isPercent ? 'На сколько процентов' : `На сколько ${esc(currency())}`}</span>
+        <input name="value" inputmode="decimal" value="${esc(priceRaise.value)}" placeholder="${isPercent ? '10' : '100'}">
+      </label>
+
+      <div class="chips" id="price-presets" style="padding-bottom:12px">${pricePresetsHtml()}</div>
+
+      <label class="field">
+        <span>Округлить новые цены</span>
+        <select name="round">${roundOptions}</select>
+      </label>
+
+      <div class="card" id="price-preview" style="margin:2px 0 12px;padding:2px 14px;max-height:250px;overflow:auto">${pricePreviewHtml()}</div>
+
+      <div class="total-line"><span>Изменится услуг</span><b id="price-count">${priceChangedCount()} из ${data.services.length}</b></div>
+
+      <div class="sheet-actions">
+        <button class="btn" type="button" data-action="close-sheet">Отмена</button>
+        <button class="btn primary" type="submit">Применить</button>
+      </div>
+      <div class="sheet-note">Изменение можно отменить в каталоге услуг</div>
+    </form>
+  `;
+}
+
+function openPriceSheet() {
+  if (!data.services.length) return toast('Сначала добавьте услуги в каталог');
+  sheetState.type = 'price';
+  sheetState.id = null;
+  priceRaise.mode = 'percent';
+  priceRaise.value = 10;
+  priceRaise.round = 0;
+  openSheet(priceSheetHtml());
+}
+
+function syncPriceForm() {
+  const form = $('#price-form');
+  if (!form) return;
+  priceRaise.value = parseAmount(form.querySelector('[name="value"]').value);
+  priceRaise.round = Number(form.querySelector('[name="round"]').value) || 0;
+  const preview = $('#price-preview');
+  if (preview) preview.innerHTML = pricePreviewHtml();
+  const count = $('#price-count');
+  if (count) count.textContent = `${priceChangedCount()} из ${data.services.length}`;
+}
+
+function setPriceMode(mode) {
+  priceRaise.mode = mode;
+  syncPriceForm();
+  $$('[data-price-mode]').forEach((b) => b.classList.toggle('active', b.dataset.priceMode === mode));
+  const label = $('#price-value-label');
+  if (label) label.textContent = mode === 'percent' ? 'На сколько процентов' : `На сколько ${currency()}`;
+  const presets = $('#price-presets');
+  if (presets) presets.innerHTML = pricePresetsHtml();
+  const input = $('#price-form [name="value"]');
+  if (input) input.placeholder = mode === 'percent' ? '10' : '100';
+  syncPriceForm();
+}
+
+function applyPricePreset(value) {
+  const input = $('#price-form [name="value"]');
+  if (input) input.value = value;
+  syncPriceForm();
+}
+
+function applyPriceChange() {
+  syncPriceForm();
+  if (!priceRaise.value) return toast('Укажите, на сколько изменить цены');
+  const changes = data.services.filter((s) => calcNewPrice(s.price) !== s.price);
+  if (!changes.length) return toast('Цены не изменились');
+
+  try {
+    localStorage.setItem(PRICE_UNDO_KEY, JSON.stringify({
+      at: Date.now(),
+      prices: data.services.map((s) => ({ id: s.id, price: s.price })),
+    }));
+  } catch (err) { /* ignore */ }
+  priceUndo = loadPriceUndo();
+
+  for (const svc of changes) svc.price = calcNewPrice(svc.price);
+  save();
+  closeSheet();
+  renderMore();
+  toast(`Обновлено услуг: ${changes.length}`);
+}
+
+function undoPriceChange() {
+  const rec = loadPriceUndo();
+  if (!rec || !Array.isArray(rec.prices)) return toast('Нечего отменять');
+  let restored = 0;
+  for (const item of rec.prices) {
+    const svc = data.services.find((s) => s.id === item.id);
+    if (svc && svc.price !== item.price) {
+      svc.price = item.price;
+      restored += 1;
+    }
+  }
+  clearPriceUndo();
+  save();
+  renderMore();
+  toast(restored ? 'Прежние цены восстановлены' : 'Цены уже прежние');
 }
 
 /* ---------------- резервные копии ---------------- */
@@ -1554,15 +1822,20 @@ function exportCsv() {
     .slice()
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
     .forEach((e) => {
-      rows.push([
-        e.date,
-        employeeName(e.employeeId),
-        e.service,
-        String(e.qty).replace('.', ','),
-        String(round2(e.price)).replace('.', ','),
-        String(round2(e.amount)).replace('.', ','),
-        e.note || '',
-      ]);
+      const items = e.items && e.items.length
+        ? e.items
+        : [{ service: 'Услуга', qty: 1, price: e.amount, amount: e.amount }];
+      items.forEach((it) => {
+        rows.push([
+          e.date,
+          employeeName(e.employeeId),
+          it.service,
+          String(it.qty).replace('.', ','),
+          String(round2(it.price)).replace('.', ','),
+          String(round2(it.amount)).replace('.', ','),
+          e.note || '',
+        ]);
+      });
     });
   const csv = '\uFEFF' + rows.map((r) => r.map(csvCell).join(';')).join('\r\n');
   const stamp = toKey(new Date());
@@ -1643,17 +1916,25 @@ function addDemo() {
     if (day.getDay() === 0 && Math.random() < 0.6) continue;
     const count = 1 + Math.floor(Math.random() * 3);
     for (let j = 0; j < count; j++) {
-      const svc = demoServices[Math.floor(Math.random() * demoServices.length)];
       const emp = emps[Math.floor(Math.random() * emps.length)];
-      const qty = Math.random() < 0.15 ? 2 : 1;
+      const serviceCount = Math.random() < 0.35 ? 2 : 1;
+      const items = [];
+      for (let k = 0; k < serviceCount; k++) {
+        const svc = demoServices[Math.floor(Math.random() * demoServices.length)];
+        const qty = Math.random() < 0.15 ? 2 : 1;
+        items.push({
+          service: svc.name,
+          qty,
+          price: svc.price,
+          amount: round2(svc.price * qty),
+        });
+      }
       data.entries.push({
         id: uid(),
         date: toKey(day),
         employeeId: emp.id,
-        service: svc.name,
-        qty,
-        price: svc.price,
-        amount: round2(svc.price * qty),
+        items,
+        amount: round2(items.reduce((s, it) => s + it.amount, 0)),
         note: '',
         createdAt: day.getTime() + j * 3600000,
       });
@@ -1738,6 +2019,18 @@ document.addEventListener('click', (e) => {
     return;
   }
 
+  const priceMode = e.target.closest('[data-price-mode]');
+  if (priceMode) {
+    setPriceMode(priceMode.dataset.priceMode);
+    return;
+  }
+
+  const pricePreset = e.target.closest('[data-price-preset]');
+  if (pricePreset) {
+    applyPricePreset(pricePreset.dataset.pricePreset);
+    return;
+  }
+
   const periodBtn = e.target.closest('[data-period]');
   if (periodBtn) {
     ui.period = periodBtn.dataset.period;
@@ -1766,6 +2059,12 @@ document.addEventListener('click', (e) => {
       break;
     case 'delete-entry':
       deleteEntry();
+      break;
+    case 'add-item':
+      addItemRow();
+      break;
+    case 'remove-item':
+      removeItemRow(btn);
       break;
     case 'close-sheet':
       closeSheet();
@@ -1811,6 +2110,12 @@ document.addEventListener('click', (e) => {
       break;
     case 'delete-service':
       deleteService();
+      break;
+    case 'raise-prices':
+      openPriceSheet();
+      break;
+    case 'undo-prices':
+      undoPriceChange();
       break;
     case 'export-csv':
       exportCsv();
@@ -1886,10 +2191,12 @@ document.addEventListener('submit', (e) => {
   if (e.target.id === 'entry-form') saveEntry(e.target);
   else if (e.target.id === 'employee-form') saveEmployee(e.target);
   else if (e.target.id === 'service-form') saveService(e.target);
+  else if (e.target.id === 'price-form') applyPriceChange();
 });
 
 document.addEventListener('input', (e) => {
   if (e.target.closest('#entry-form')) updateEntryTotal();
+  if (e.target.closest('#price-form')) syncPriceForm();
   if (e.target.id === 'rec-search') {
     ui.recordsQuery = e.target.value;
     renderRecordsList();
@@ -1897,10 +2204,11 @@ document.addEventListener('input', (e) => {
 });
 
 document.addEventListener('change', (e) => {
-  if (e.target.matches('#entry-form [name="service"]')) {
+  if (e.target.matches('#entry-form [name="item-service"]')) {
     const value = e.target.value.trim().toLowerCase();
     const svc = data.services.find((s) => s.name.toLowerCase() === value);
-    const priceEl = $('#entry-form [name="price"]');
+    const row = e.target.closest('.item-row');
+    const priceEl = row ? row.querySelector('[name="item-price"]') : null;
     if (svc && priceEl && !parseAmount(priceEl.value)) {
       priceEl.value = svc.price;
       updateEntryTotal();
@@ -1912,10 +2220,29 @@ document.addEventListener('change', (e) => {
     renderAll();
     toast('Валюта изменена');
   }
+  if (e.target.closest('#price-form') && e.target.name === 'round') syncPriceForm();
 });
 
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeSheet();
+  if (e.key === 'Escape') {
+    closeSheet();
+    return;
+  }
+  if (e.key !== 'Enter' || !e.target.closest) return;
+  const row = e.target.closest('.item-row');
+  if (!row) return;
+  e.preventDefault();
+  const name = e.target.getAttribute('name');
+  if (name === 'item-service') {
+    const next = row.querySelector('[name="item-price"]');
+    if (next) next.focus();
+  } else if (name === 'item-price') {
+    const next = row.querySelector('[name="item-qty"]');
+    if (next) next.focus();
+  } else if (name === 'item-qty') {
+    const rows = $$('.item-row', row.parentElement);
+    if (rows[rows.length - 1] === row) addItemRow();
+  }
 });
 
 window.addEventListener('beforeinstallprompt', (e) => {
