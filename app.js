@@ -6,7 +6,8 @@ const LS_KEY = 'zarabotok_v1';
 const CLOUD_KEY = 'zarabotok_cloud_v1';
 const BACKUP_PROMPT_KEY = 'zarabotok_backup_prompt';
 const PRICE_UNDO_KEY = 'zarabotok_price_undo';
-const APP_VERSION = '1.3.0';
+const IMPORT_MAP_KEY = 'zarabotok_import_map';
+const APP_VERSION = '1.4.0';
 
 const PALETTE = ['#16a34a', '#2563eb', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 const CURRENCIES = [
@@ -765,6 +766,15 @@ function renderMore() {
 
     ${backupCardHtml}
 
+    <div class="section-title">Сбор данных от сотрудников</div>
+    <div class="card">
+      <p class="tiny muted">Если сотрудники ведут учёт на своих телефонах: они нажимают «Отправить мои данные» и присылают файл. Здесь выберите эти файлы — записи объединятся с вашими, дубликаты не появятся.</p>
+      <div class="mt12">
+        <button class="btn block" type="button" data-action="share-data">Отправить мои данные</button>
+        <button class="btn primary block" type="button" data-action="import-employees" style="margin-top:8px">Импортировать файлы</button>
+      </div>
+    </div>
+
     <div class="card" style="padding:4px 16px">
       <button class="line" type="button" data-action="export-csv">
         <div class="grow"><div class="ttl">Экспорт в CSV</div><div class="dsc">для Excel / Google Таблиц</div></div>${CHEV}
@@ -1366,6 +1376,273 @@ function undoPriceChange() {
   save();
   renderMore();
   toast(restored ? 'Прежние цены восстановлены' : 'Цены уже прежние');
+}
+
+/* ---------------- обмен данными с сотрудниками ---------------- */
+
+let importState = { files: [], groups: [] };
+
+function loadImportMap() {
+  try { return JSON.parse(localStorage.getItem(IMPORT_MAP_KEY) || '{}'); } catch (err) { return {}; }
+}
+
+function saveImportMap(map) {
+  try { localStorage.setItem(IMPORT_MAP_KEY, JSON.stringify(map)); } catch (err) { /* ignore */ }
+}
+
+function shortDate(key) {
+  const d = fromKey(key);
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${String(d.getFullYear()).slice(-2)}`;
+}
+
+function importRange(group) {
+  return group.from === group.to
+    ? shortDate(group.from)
+    : `${shortDate(group.from)} – ${shortDate(group.to)}`;
+}
+
+async function shareMyData() {
+  if (!data.entries.length) return toast('Пока нет записей для отправки');
+
+  const payload = {
+    format: 'zarabotok-share',
+    version: 1,
+    exportedAt: Date.now(),
+    employees: data.employees,
+    services: data.services,
+    entries: data.entries,
+  };
+  const json = JSON.stringify(payload);
+  const who = data.employees.map((e) => e.name).join('-') || 'zarabotok';
+  const safe = who.replace(/[^\wа-яА-ЯёЁ-]+/g, '-').slice(0, 40) || 'zarabotok';
+  const filename = `zarabotok-${safe}-${toKey(new Date())}.json`;
+
+  try {
+    if (typeof File !== 'undefined' && navigator.canShare) {
+      const file = new File([json], filename, { type: 'application/json' });
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Данные заработка', text: 'Файл для руководителя' });
+        toast('Файл отправлен');
+        return;
+      }
+    }
+  } catch (err) {
+    if (err && err.name === 'AbortError') return;
+    console.warn('Не удалось поделиться файлом', err);
+  }
+
+  download(filename, json, 'application/json');
+  toast('Файл сохранён — отправьте его руководителю');
+}
+
+function importFromEmployees() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/json,.json';
+  input.multiple = true;
+  input.onchange = () => {
+    const files = Array.from(input.files || []);
+    if (files.length) openImportFromFiles(files);
+  };
+  input.click();
+}
+
+async function openImportFromFiles(files) {
+  const parsed = [];
+  for (const file of files) {
+    try {
+      const text = await file.text();
+      const obj = JSON.parse(text);
+      const norm = normalize(obj);
+      if (!norm.entries.length) continue;
+      parsed.push({ name: file.name, data: norm });
+    } catch (err) {
+      console.warn('Не удалось прочитать файл', file.name, err);
+    }
+  }
+  if (!parsed.length) return toast('В выбранных файлах нет записей');
+
+  importState = { files: parsed, groups: buildImportGroups(parsed) };
+  openSheet(importSheetHtml(parsed, importState.groups, loadImportMap()));
+}
+
+function buildImportGroups(files) {
+  const groups = [];
+  files.forEach((file, index) => {
+    const employees = new Map((file.data.employees || []).map((e) => [e.id, e]));
+    const byEmployee = new Map();
+
+    for (const entry of file.data.entries) {
+      const key = `${index}:${entry.employeeId || 'none'}`;
+      if (!byEmployee.has(key)) {
+        const emp = entry.employeeId ? employees.get(entry.employeeId) : null;
+        byEmployee.set(key, {
+          key,
+          name: emp ? emp.name : 'Без сотрудника',
+          file: file.name,
+          entries: [],
+        });
+      }
+      byEmployee.get(key).entries.push(entry);
+    }
+
+    for (const group of byEmployee.values()) {
+      const dates = group.entries.map((e) => e.date).sort();
+      group.total = round2(group.entries.reduce((sum, e) => sum + e.amount, 0));
+      group.count = group.entries.length;
+      group.from = dates[0];
+      group.to = dates[dates.length - 1];
+      groups.push(group);
+    }
+  });
+  return groups;
+}
+
+function defaultImportTarget(name, map) {
+  if (name === 'Без сотрудника') return 'none';
+  const saved = map[name];
+  if (saved && data.employees.some((e) => e.id === saved)) return `emp:${saved}`;
+  if (name && name !== 'Я') {
+    const match = data.employees.find((e) => e.name.toLowerCase() === name.toLowerCase());
+    if (match) return `emp:${match.id}`;
+  }
+  return 'new';
+}
+
+function importSheetHtml(files, groups, map) {
+  const rows = groups.map((group) => {
+    const selected = defaultImportTarget(group.name, map);
+    const newName = group.name === 'Я' || group.name === 'Без сотрудника' ? '' : group.name;
+    const options = [
+      `<option value="new" ${selected === 'new' ? 'selected' : ''}>Создать сотрудника</option>`,
+      ...data.employees.map((emp) => `<option value="emp:${esc(emp.id)}" ${selected === `emp:${emp.id}` ? 'selected' : ''}>${esc(emp.name)}</option>`),
+      `<option value="none" ${selected === 'none' ? 'selected' : ''}>Без сотрудника</option>`,
+      `<option value="skip" ${selected === 'skip' ? 'selected' : ''}>Не импортировать</option>`,
+    ].join('');
+
+    return `<div class="import-group" data-key="${esc(group.key)}">
+      <div class="ttl">${esc(group.name)}</div>
+      <div class="dsc">${group.count} ${plural(group.count, 'запись', 'записи', 'записей')} · ${money(group.total)} · ${esc(importRange(group))}</div>
+      <div class="dsc">${esc(group.file)}</div>
+      <select name="target" data-import-target>${options}</select>
+      <input class="import-name" name="new-name" placeholder="Имя нового сотрудника" value="${esc(newName)}" style="${selected === 'new' ? '' : 'display:none'}">
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="grab"></div>
+    <div class="sheet-head">
+      <h2>Импорт от сотрудников</h2>
+      <button class="x" type="button" data-action="close-sheet" aria-label="Закрыть">${X_ICON}</button>
+    </div>
+    <p class="tiny muted">Проверьте, кому принадлежат записи. Из файлов добавятся записи и недостающие услуги; настройки и сотрудники из чужого телефона не затрагиваются. Повторный импорт не создаёт дубликаты.</p>
+    ${files.length > 1 ? `<p class="tiny muted mt8">Файлов: ${files.length}</p>` : ''}
+    <form id="import-form" novalidate>
+      <div class="mt12">${rows}</div>
+      <label class="check-row"><input type="checkbox" name="overwrite"> Обновлять уже импортированные записи</label>
+      <div class="sheet-actions">
+        <button class="btn" type="button" data-action="close-sheet">Отмена</button>
+        <button class="btn primary" type="submit">Импортировать</button>
+      </div>
+      <div class="sheet-note">Импортированные записи появятся в общих итогах и в разделе «Сотрудники»</div>
+    </form>
+  `;
+}
+
+function toggleImportName(select) {
+  const row = select.closest('.import-group');
+  const input = row ? row.querySelector('.import-name') : null;
+  if (!input) return;
+  const isNew = select.value === 'new';
+  input.style.display = isNew ? '' : 'none';
+  if (isNew) input.focus();
+}
+
+function applyImport(form) {
+  const overwrite = !!form.querySelector('[name="overwrite"]').checked;
+  const map = loadImportMap();
+  const plans = [];
+
+  for (const row of $$('.import-group', form)) {
+    const group = importState.groups.find((g) => g.key === row.dataset.key);
+    if (!group) continue;
+    const select = row.querySelector('[name="target"]');
+    const value = select.value;
+    if (value === 'skip') continue;
+
+    let targetId = null;
+    if (value === 'new') {
+      const input = row.querySelector('[name="new-name"]');
+      const name = input ? input.value.trim() : '';
+      if (!name) {
+        if (input) input.focus();
+        return toast('Укажите имя сотрудника');
+      }
+      const emp = {
+        id: uid(),
+        name,
+        color: PALETTE[data.employees.length % PALETTE.length],
+        createdAt: Date.now(),
+      };
+      data.employees.push(emp);
+      targetId = emp.id;
+    } else if (value === 'none') {
+      targetId = null;
+    } else if (value.startsWith('emp:')) {
+      targetId = value.slice(4);
+    }
+
+    plans.push({ group, targetId, name: group.name });
+  }
+
+  if (!plans.length) return toast('Все сотрудники пропущены');
+
+  let addedServices = 0;
+  for (const file of importState.files) {
+    for (const svc of file.data.services || []) {
+      if (!data.services.some((s) => s.name.toLowerCase() === svc.name.toLowerCase())) {
+        data.services.push({ id: uid(), name: svc.name, price: round2(svc.price) });
+        addedServices += 1;
+      }
+    }
+  }
+
+  const existing = new Map(data.entries.map((e) => [e.id, e]));
+  let added = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  for (const plan of plans) {
+    for (const entry of plan.group.entries) {
+      const copy = Object.assign({}, entry, { employeeId: plan.targetId });
+      if (!existing.has(entry.id)) {
+        data.entries.push(copy);
+        existing.set(entry.id, copy);
+        added += 1;
+      } else if (overwrite) {
+        Object.assign(existing.get(entry.id), copy);
+        updated += 1;
+      } else {
+        skipped += 1;
+      }
+    }
+    if (plan.name && plan.name !== 'Я' && plan.name !== 'Без сотрудника' && plan.targetId) {
+      map[plan.name] = plan.targetId;
+    }
+  }
+
+  saveImportMap(map);
+  save();
+  closeSheet();
+  ui.anchor = new Date();
+  renderAll();
+
+  const parts = [];
+  if (added) parts.push(`добавлено ${added}`);
+  if (updated) parts.push(`обновлено ${updated}`);
+  if (skipped) parts.push(`пропущено ${skipped}`);
+  if (addedServices) parts.push(`услуг ${addedServices}`);
+  toast(parts.length ? parts.join(' · ') : 'Новых записей нет');
 }
 
 /* ---------------- резервные копии ---------------- */
@@ -2117,6 +2394,12 @@ document.addEventListener('click', (e) => {
     case 'undo-prices':
       undoPriceChange();
       break;
+    case 'share-data':
+      shareMyData();
+      break;
+    case 'import-employees':
+      importFromEmployees();
+      break;
     case 'export-csv':
       exportCsv();
       break;
@@ -2192,6 +2475,7 @@ document.addEventListener('submit', (e) => {
   else if (e.target.id === 'employee-form') saveEmployee(e.target);
   else if (e.target.id === 'service-form') saveService(e.target);
   else if (e.target.id === 'price-form') applyPriceChange();
+  else if (e.target.id === 'import-form') applyImport(e.target);
 });
 
 document.addEventListener('input', (e) => {
@@ -2221,6 +2505,7 @@ document.addEventListener('change', (e) => {
     toast('Валюта изменена');
   }
   if (e.target.closest('#price-form') && e.target.name === 'round') syncPriceForm();
+  if (e.target.matches('[data-import-target]')) toggleImportName(e.target);
 });
 
 window.addEventListener('keydown', (e) => {
