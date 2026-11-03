@@ -142,6 +142,7 @@ let deferredPrompt = null;
 function save() {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(data));
+    scheduleSnapshot();
   } catch (err) {
     toast('Не удалось сохранить данные');
     console.error(err);
@@ -1192,6 +1193,28 @@ async function pruneSnapshots() {
   for (const s of rest.slice(24)) await dbDel(s.id);
 }
 
+let snapshotTimer = null;
+let snapshotsPaused = false;
+
+function scheduleSnapshot() {
+  if (snapshotsPaused) return;
+  clearTimeout(snapshotTimer);
+  snapshotTimer = setTimeout(() => { refreshCurrentSnapshot(); }, 1200);
+}
+
+async function refreshCurrentSnapshot() {
+  try {
+    const month = toKey(new Date()).slice(0, 7);
+    const json = JSON.stringify(data);
+    const existing = await dbGet(month);
+    if (existing && existing.json === json) return;
+    await dbPut({ id: month, at: Date.now(), kind: 'auto', json });
+    await refreshBackupInfo();
+  } catch (err) {
+    /* копию обновим при следующем запуске */
+  }
+}
+
 async function autoMonthlyBackup() {
   const month = toKey(new Date()).slice(0, 7);
   try {
@@ -1648,8 +1671,17 @@ async function clearAll() {
     okText: 'Очистить',
   });
   if (!ok) return;
-  data = defaultData();
-  save();
+  try {
+    await dbPut({ id: 'manual-' + Date.now(), at: Date.now(), kind: 'manual', json: JSON.stringify(data) });
+  } catch (err) { /* если хранилище недоступно — продолжаем */ }
+  snapshotsPaused = true;
+  try {
+    data = defaultData();
+    save();
+  } finally {
+    snapshotsPaused = false;
+  }
+  refreshBackupInfo();
   closeSheet();
   ui.anchor = new Date();
   ui.recordsMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
