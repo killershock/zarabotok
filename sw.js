@@ -1,7 +1,7 @@
 /* Офлайн-кэш приложения.
    Стратегия: сначала сеть (чтобы обновления прилетали сразу),
    при отсутствии интернета — берём из кэша. */
-const CACHE = 'zarabotok-v2';
+const CACHE = 'zarabotok-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -38,7 +38,7 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   event.respondWith(
-    fetch(req)
+    fetch(req, { cache: 'no-store' })
       .then((res) => {
         if (res && res.ok) {
           const copy = res.clone();
