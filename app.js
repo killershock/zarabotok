@@ -7,7 +7,7 @@ const CLOUD_KEY = 'zarabotok_cloud_v1';
 const BACKUP_PROMPT_KEY = 'zarabotok_backup_prompt';
 const PRICE_UNDO_KEY = 'zarabotok_price_undo';
 const IMPORT_MAP_KEY = 'zarabotok_import_map';
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 
 const PALETTE = ['#16a34a', '#2563eb', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 const CURRENCIES = [
@@ -733,12 +733,15 @@ function renderMore() {
     <div class="card">
       <div class="card-head"><h2>Каталог услуг</h2><button class="txt-btn" type="button" data-action="add-service">+ Добавить</button></div>
       ${data.services.length
-        ? data.services.map((s) => `<button class="line" type="button" data-action="edit-service" data-id="${esc(s.id)}">
-            <div class="grow"><div class="ttl">${esc(s.name)}</div><div class="dsc">подставляется в запись</div></div>
-            <div class="val">${money(s.price)}</div>
-            ${CHEV}
-          </button>`).join('')
+        ? data.services.map((s) => `<div class="service-row">
+            <button class="line" type="button" data-action="edit-service" data-id="${esc(s.id)}">
+              <div class="grow"><div class="ttl">${esc(s.name)}</div><div class="dsc">подставляется в запись</div></div>
+              <div class="val">${money(s.price)}</div>
+            </button>
+            <button class="raise-one" type="button" data-action="raise-one-price" data-id="${esc(s.id)}" aria-label="Повысить цену: ${esc(s.name)}" title="Повысить цену только этой услуги">+%</button>
+          </div>`).join('')
         : `<p class="tiny muted">Добавьте частые услуги с ценой — при создании записи цена подставится автоматически, и заполнять станет быстрее.</p>`}
+      ${data.services.length ? `<p class="tiny muted" style="margin:4px 2px 2px">Кнопка «+%» — повысить цену только этой услуги</p>` : ''}
       ${data.services.length ? `<div class="row-actions mt12">
         <button class="btn" type="button" data-action="raise-prices">Повысить цены</button>
       </div>
@@ -1261,6 +1264,9 @@ function pricePresetsHtml() {
 
 function priceSheetHtml() {
   const isPercent = priceRaise.mode === 'percent';
+  const single = priceRaise.selected.size === 1
+    ? data.services.find((s) => priceRaise.selected.has(s.id))
+    : null;
   const roundOptions = [
     [0, 'Без округления'],
     [1, 'До целого'],
@@ -1272,10 +1278,12 @@ function priceSheetHtml() {
   return `
     <div class="grab"></div>
     <div class="sheet-head">
-      <h2>Повышение цен</h2>
+      <h2>${single ? 'Повышение цены' : 'Повышение цен'}</h2>
       <button class="x" type="button" data-action="close-sheet" aria-label="Закрыть">${X_ICON}</button>
     </div>
-    <p class="tiny muted">Выберите услуги: можно изменить все сразу или только нужные. Записи и суммы за прошлые дни не изменятся.</p>
+    <p class="tiny muted">${single
+      ? `Отмечена только «${esc(single.name)}». Изменятся только отмеченные услуги, записи и суммы за прошлые дни не изменятся.`
+      : 'Выберите услуги: можно изменить все сразу или только нужные. Записи и суммы за прошлые дни не изменятся.'}</p>
 
     <div class="segmented" style="grid-template-columns:1fr 1fr;margin:14px 0 10px">
       <button type="button" data-price-mode="percent" class="${isPercent ? 'active' : ''}">Процент</button>
@@ -1316,14 +1324,15 @@ function priceSheetHtml() {
   `;
 }
 
-function openPriceSheet() {
+function openPriceSheet(preselectId) {
   if (!data.services.length) return toast('Сначала добавьте услуги в каталог');
   sheetState.type = 'price';
   sheetState.id = null;
   priceRaise.mode = 'percent';
   priceRaise.value = 10;
   priceRaise.round = 0;
-  priceRaise.selected = new Set(data.services.map((s) => s.id));
+  const one = preselectId ? data.services.find((s) => s.id === preselectId) : null;
+  priceRaise.selected = new Set(one ? [one.id] : data.services.map((s) => s.id));
   openSheet(priceSheetHtml());
 }
 
@@ -2439,6 +2448,9 @@ document.addEventListener('click', (e) => {
       break;
     case 'raise-prices':
       openPriceSheet();
+      break;
+    case 'raise-one-price':
+      openPriceSheet(id);
       break;
     case 'undo-prices':
       undoPriceChange();
