@@ -7,7 +7,7 @@ const CLOUD_KEY = 'zarabotok_cloud_v1';
 const BACKUP_PROMPT_KEY = 'zarabotok_backup_prompt';
 const PRICE_UNDO_KEY = 'zarabotok_price_undo';
 const IMPORT_MAP_KEY = 'zarabotok_import_map';
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.7.1';
 
 const PALETTE = ['#16a34a', '#2563eb', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 const CURRENCIES = [
@@ -1239,21 +1239,23 @@ function priceChangedCount() {
   return data.services.filter((s) => priceRaise.selected.has(s.id) && calcNewPrice(s.price) !== s.price).length;
 }
 
+function priceRowValHtml(s, on) {
+  const next = calcNewPrice(s.price);
+  const changed = on && next !== s.price;
+  return `${changed ? `<span class="price-old">${money(s.price)}</span><span class="price-arrow">→</span>` : ''}
+    <span class="${changed ? 'price-new' : ''}">${money(on ? next : s.price)}</span>`;
+}
+
 function pricePreviewHtml() {
   if (!data.services.length) {
     return '<div class="empty" style="padding:18px"><div class="d">В каталоге пока нет услуг</div></div>';
   }
   return data.services.map((s) => {
     const on = priceRaise.selected.has(s.id);
-    const next = calcNewPrice(s.price);
-    const changed = on && next !== s.price;
-    return `<label class="line price-row ${on ? '' : 'off'}">
+    return `<label class="line price-row ${on ? '' : 'off'}" data-service-id="${esc(s.id)}">
       <input type="checkbox" data-price-service="${esc(s.id)}" ${on ? 'checked' : ''}>
       <div class="grow"><div class="ttl">${esc(s.name)}</div></div>
-      <div class="val" style="font-size:13px">
-        ${changed ? `<span class="price-old">${money(s.price)}</span><span class="price-arrow">→</span>` : ''}
-        <span class="${changed ? 'price-new' : ''}">${money(on ? next : s.price)}</span>
-      </div>
+      <div class="val price-val" style="font-size:13px">${priceRowValHtml(s, on)}</div>
     </label>`;
   }).join('');
 }
@@ -1350,9 +1352,7 @@ function openPriceSheet(preselect) {
   openSheet(priceSheetHtml());
 }
 
-function renderPricePreview() {
-  const preview = $('#price-preview');
-  if (preview) preview.innerHTML = pricePreviewHtml();
+function refreshPriceUi() {
   const count = $('#price-count');
   if (count) count.textContent = `${priceChangedCount()} из ${data.services.length}`;
   const selected = $('#price-selected-count');
@@ -1363,6 +1363,27 @@ function renderPricePreview() {
   if (title) title.textContent = priceRaise.selected.size === 1 ? 'Повышение цены' : 'Повышение цен';
   const intro = $('#price-intro');
   if (intro) intro.textContent = priceIntroText();
+}
+
+function renderPricePreview() {
+  const preview = $('#price-preview');
+  if (preview) preview.innerHTML = pricePreviewHtml();
+  refreshPriceUi();
+}
+
+// Обновление галочек без перерисовки списка: иначе клик по строке срабатывает дважды.
+function renderPriceSelection() {
+  $$('.price-row').forEach((row) => {
+    const id = row.dataset.serviceId;
+    const on = priceRaise.selected.has(id);
+    const checkbox = row.querySelector('[data-price-service]');
+    if (checkbox) checkbox.checked = on;
+    row.classList.toggle('off', !on);
+    const svc = data.services.find((s) => s.id === id);
+    const val = row.querySelector('.price-val');
+    if (svc && val) val.innerHTML = priceRowValHtml(svc, on);
+  });
+  refreshPriceUi();
 }
 
 function syncPriceForm() {
@@ -2368,7 +2389,7 @@ document.addEventListener('click', (e) => {
     } else {
       priceRaise.selected.clear();
     }
-    renderPricePreview();
+    renderPriceSelection();
     return;
   }
 
@@ -2564,7 +2585,7 @@ document.addEventListener('submit', (e) => {
 
 document.addEventListener('input', (e) => {
   if (e.target.closest('#entry-form')) updateEntryTotal();
-  if (e.target.closest('#price-form')) syncPriceForm();
+  if (e.target.matches('#price-form [name="value"]')) syncPriceForm();
   if (e.target.id === 'rec-search') {
     ui.recordsQuery = e.target.value;
     renderRecordsList();
@@ -2591,9 +2612,19 @@ document.addEventListener('change', (e) => {
   if (e.target.closest('#price-form') && e.target.name === 'round') syncPriceForm();
   if (e.target.matches('[data-import-target]')) toggleImportName(e.target);
   if (e.target.matches('[data-price-service]')) {
-    if (e.target.checked) priceRaise.selected.add(e.target.dataset.priceService);
-    else priceRaise.selected.delete(e.target.dataset.priceService);
-    renderPricePreview();
+    const id = e.target.dataset.priceService;
+    const on = e.target.checked;
+    if (on) priceRaise.selected.add(id);
+    else priceRaise.selected.delete(id);
+
+    const row = e.target.closest('.price-row');
+    if (row) {
+      row.classList.toggle('off', !on);
+      const svc = data.services.find((s) => s.id === id);
+      const val = row.querySelector('.price-val');
+      if (svc && val) val.innerHTML = priceRowValHtml(svc, on);
+    }
+    refreshPriceUi();
   }
 });
 
