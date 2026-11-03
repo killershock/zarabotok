@@ -7,7 +7,7 @@ const CLOUD_KEY = 'zarabotok_cloud_v1';
 const BACKUP_PROMPT_KEY = 'zarabotok_backup_prompt';
 const PRICE_UNDO_KEY = 'zarabotok_price_undo';
 const IMPORT_MAP_KEY = 'zarabotok_import_map';
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 
 const PALETTE = ['#16a34a', '#2563eb', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 const CURRENCIES = [
@@ -1149,6 +1149,12 @@ function openServiceSheet(id) {
     <form id="service-form" novalidate>
       <label class="field"><span>Название</span><input name="name" value="${esc(svc ? svc.name : '')}" placeholder="Например, стрижка" autocomplete="off"></label>
       <label class="field"><span>Цена, ${esc(currency())}</span><input name="price" inputmode="decimal" placeholder="0" value="${esc(svc ? svc.price : '')}"></label>
+      ${svc ? `<div class="quick-raise">
+        <span>Повысить цену</span>
+        <div class="chips" style="padding-bottom:0">
+          ${[5, 10, 15, 20].map((p) => `<button class="chip" type="button" data-quick-raise="${p}">+${p}%</button>`).join('')}
+        </div>
+      </div>` : ''}
       <div class="sheet-actions">
         ${svc ? '<button class="btn danger" type="button" data-action="delete-service">Удалить</button>' : ''}
         <button class="btn primary" type="submit">Сохранить</button>
@@ -1198,7 +1204,7 @@ async function deleteService() {
 /* ---------------- массовое изменение цен ---------------- */
 
 let priceUndo = loadPriceUndo();
-const priceRaise = { mode: 'percent', value: 10, round: 0 };
+const priceRaise = { mode: 'percent', value: 10, round: 0, selected: new Set() };
 
 function loadPriceUndo() {
   try { return JSON.parse(localStorage.getItem(PRICE_UNDO_KEY) || 'null'); } catch (err) { return null; }
@@ -1226,7 +1232,7 @@ function calcNewPrice(price) {
 }
 
 function priceChangedCount() {
-  return data.services.filter((s) => calcNewPrice(s.price) !== s.price).length;
+  return data.services.filter((s) => priceRaise.selected.has(s.id) && calcNewPrice(s.price) !== s.price).length;
 }
 
 function pricePreviewHtml() {
@@ -1234,15 +1240,17 @@ function pricePreviewHtml() {
     return '<div class="empty" style="padding:18px"><div class="d">В каталоге пока нет услуг</div></div>';
   }
   return data.services.map((s) => {
+    const on = priceRaise.selected.has(s.id);
     const next = calcNewPrice(s.price);
-    const changed = next !== s.price;
-    return `<div class="line">
+    const changed = on && next !== s.price;
+    return `<label class="line price-row ${on ? '' : 'off'}">
+      <input type="checkbox" data-price-service="${esc(s.id)}" ${on ? 'checked' : ''}>
       <div class="grow"><div class="ttl">${esc(s.name)}</div></div>
       <div class="val" style="font-size:13px">
         ${changed ? `<span class="price-old">${money(s.price)}</span><span class="price-arrow">→</span>` : ''}
-        <span class="${changed ? 'price-new' : ''}">${money(next)}</span>
+        <span class="${changed ? 'price-new' : ''}">${money(on ? next : s.price)}</span>
       </div>
-    </div>`;
+    </label>`;
   }).join('');
 }
 
@@ -1267,7 +1275,7 @@ function priceSheetHtml() {
       <h2>Повышение цен</h2>
       <button class="x" type="button" data-action="close-sheet" aria-label="Закрыть">${X_ICON}</button>
     </div>
-    <p class="tiny muted">Новые цены применятся ко всем услугам в каталоге. Уже созданные записи и суммы за прошлые дни не изменятся.</p>
+    <p class="tiny muted">Выберите услуги: можно изменить все сразу или только нужные. Записи и суммы за прошлые дни не изменятся.</p>
 
     <div class="segmented" style="grid-template-columns:1fr 1fr;margin:14px 0 10px">
       <button type="button" data-price-mode="percent" class="${isPercent ? 'active' : ''}">Процент</button>
@@ -1287,7 +1295,15 @@ function priceSheetHtml() {
         <select name="round">${roundOptions}</select>
       </label>
 
-      <div class="card" id="price-preview" style="margin:2px 0 12px;padding:2px 14px;max-height:250px;overflow:auto">${pricePreviewHtml()}</div>
+      <div class="price-select-head">
+        <span id="price-selected-count">Выбрано: ${priceRaise.selected.size} из ${data.services.length}</span>
+        <div class="price-select-actions">
+          <button type="button" data-price-select="all">Все</button>
+          <button type="button" data-price-select="none">Ничего</button>
+        </div>
+      </div>
+
+      <div class="card" id="price-preview" style="margin:0 0 12px;padding:2px 14px;max-height:250px;overflow:auto">${pricePreviewHtml()}</div>
 
       <div class="total-line"><span>Изменится услуг</span><b id="price-count">${priceChangedCount()} из ${data.services.length}</b></div>
 
@@ -1307,7 +1323,17 @@ function openPriceSheet() {
   priceRaise.mode = 'percent';
   priceRaise.value = 10;
   priceRaise.round = 0;
+  priceRaise.selected = new Set(data.services.map((s) => s.id));
   openSheet(priceSheetHtml());
+}
+
+function renderPricePreview() {
+  const preview = $('#price-preview');
+  if (preview) preview.innerHTML = pricePreviewHtml();
+  const count = $('#price-count');
+  if (count) count.textContent = `${priceChangedCount()} из ${data.services.length}`;
+  const selected = $('#price-selected-count');
+  if (selected) selected.textContent = `Выбрано: ${priceRaise.selected.size} из ${data.services.length}`;
 }
 
 function syncPriceForm() {
@@ -1315,10 +1341,7 @@ function syncPriceForm() {
   if (!form) return;
   priceRaise.value = parseAmount(form.querySelector('[name="value"]').value);
   priceRaise.round = Number(form.querySelector('[name="round"]').value) || 0;
-  const preview = $('#price-preview');
-  if (preview) preview.innerHTML = pricePreviewHtml();
-  const count = $('#price-count');
-  if (count) count.textContent = `${priceChangedCount()} из ${data.services.length}`;
+  renderPricePreview();
 }
 
 function setPriceMode(mode) {
@@ -1343,7 +1366,8 @@ function applyPricePreset(value) {
 function applyPriceChange() {
   syncPriceForm();
   if (!priceRaise.value) return toast('Укажите, на сколько изменить цены');
-  const changes = data.services.filter((s) => calcNewPrice(s.price) !== s.price);
+  if (!priceRaise.selected.size) return toast('Выберите хотя бы одну услугу');
+  const changes = data.services.filter((s) => priceRaise.selected.has(s.id) && calcNewPrice(s.price) !== s.price);
   if (!changes.length) return toast('Цены не изменились');
 
   try {
@@ -2308,6 +2332,31 @@ document.addEventListener('click', (e) => {
     return;
   }
 
+  const priceSelect = e.target.closest('[data-price-select]');
+  if (priceSelect) {
+    if (priceSelect.dataset.priceSelect === 'all') {
+      priceRaise.selected = new Set(data.services.map((s) => s.id));
+    } else {
+      priceRaise.selected.clear();
+    }
+    renderPricePreview();
+    return;
+  }
+
+  const quickRaise = e.target.closest('[data-quick-raise]');
+  if (quickRaise) {
+    const form = $('#service-form');
+    const input = form ? form.querySelector('[name="price"]') : null;
+    if (!input) return;
+    const base = parseAmount(input.value);
+    if (!(base > 0)) return toast('Сначала укажите цену');
+    const pct = Number(quickRaise.dataset.quickRaise) || 0;
+    const next = round2(base * (1 + pct / 100));
+    input.value = next;
+    toast(`Новая цена: ${money(next)} · нажмите «Сохранить»`);
+    return;
+  }
+
   const periodBtn = e.target.closest('[data-period]');
   if (periodBtn) {
     ui.period = periodBtn.dataset.period;
@@ -2506,6 +2555,11 @@ document.addEventListener('change', (e) => {
   }
   if (e.target.closest('#price-form') && e.target.name === 'round') syncPriceForm();
   if (e.target.matches('[data-import-target]')) toggleImportName(e.target);
+  if (e.target.matches('[data-price-service]')) {
+    if (e.target.checked) priceRaise.selected.add(e.target.dataset.priceService);
+    else priceRaise.selected.delete(e.target.dataset.priceService);
+    renderPricePreview();
+  }
 });
 
 window.addEventListener('keydown', (e) => {
