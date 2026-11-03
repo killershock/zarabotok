@@ -5,7 +5,7 @@
 const LS_KEY = 'zarabotok_v1';
 const CLOUD_KEY = 'zarabotok_cloud_v1';
 const BACKUP_PROMPT_KEY = 'zarabotok_backup_prompt';
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.1.1';
 
 const PALETTE = ['#16a34a', '#2563eb', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 const CURRENCIES = [
@@ -1953,7 +1953,9 @@ function init() {
 
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js').catch((err) => console.warn('SW не зарегистрирован', err));
+      navigator.serviceWorker.register('./sw.js')
+        .then((reg) => reg.update().catch(() => {}))
+        .catch((err) => console.warn('SW не зарегистрирован', err));
     });
   }
 }
